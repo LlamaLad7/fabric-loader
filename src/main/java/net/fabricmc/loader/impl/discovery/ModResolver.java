@@ -22,10 +22,15 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.sat4j.specs.ContradictionException;
@@ -53,26 +58,28 @@ public class ModResolver {
 	private static List<ModCandidate> findCompatibleSet(Collection<ModCandidate> candidates, EnvType envType, Map<String, Set<ModCandidate>> envDisabledMods) throws ModResolutionException {
 		// sort all mods by priority
 
-		List<ModCandidate> allModsSorted = new ArrayList<>(candidates);
-
-		allModsSorted.sort(modPrioComparator);
+//		List<ModCandidate> allModsSorted = new ArrayList<>(candidates);
+//
+//		allModsSorted.sort(modPrioComparator);
 
 		// group/index all mods by id
 
-		Map<String, List<ModCandidate>> modsById = new LinkedHashMap<>(); // linked to ensure consistent execution
+		SortedMap<String, SortedSet<ModCandidate>> modsById = new TreeMap<>(); // linked to ensure consistent execution
 
-		for (ModCandidate mod : allModsSorted) {
-			modsById.computeIfAbsent(mod.getId(), ignore -> new ArrayList<>()).add(mod);
+		for (ModCandidate mod : candidates) {
+			modsById.computeIfAbsent(mod.getId(), ignore -> new TreeSet<>(modPrioComparator)).add(mod);
 
 			for (String provided : mod.getProvides()) {
-				modsById.computeIfAbsent(provided, ignore -> new ArrayList<>()).add(mod);
+				modsById.computeIfAbsent(provided, ignore -> new TreeSet<>(modPrioComparator)).add(mod);
 			}
 		}
+
+		Set<ModCandidate> allMods = modsById.values().stream().flatMap(SortedSet::stream).collect(Collectors.toCollection(LinkedHashSet::new));
 
 		// soften positive deps from schema 0 or 1 mods on mods that are present but disabled for the current env
 		// this is a workaround necessary due to many mods declaring deps that are unsatisfiable in some envs and loader before 0.12x not verifying them properly
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			if (mod.getMetadata().getSchemaVersion() >= 2) continue;
 
 			for (ModDependency dep : mod.getMetadata().getDependencies()) {
@@ -96,7 +103,7 @@ public class ModResolver {
 
 		List<ModCandidate> preselectedMods = new ArrayList<>();
 
-		for (List<ModCandidate> mods : modsById.values()) {
+		for (SortedSet<ModCandidate> mods : modsById.values()) {
 			ModCandidate builtinMod = null;
 
 			for (ModCandidate mod : mods) {
@@ -116,11 +123,11 @@ public class ModResolver {
 			preselectedMods.add(builtinMod);
 		}
 
-		Map<String, ModCandidate> selectedMods = new HashMap<>(allModsSorted.size());
-		List<ModCandidate> uniqueSelectedMods = new ArrayList<>(allModsSorted.size());
+		Map<String, ModCandidate> selectedMods = new HashMap<>(allMods.size());
+		List<ModCandidate> uniqueSelectedMods = new ArrayList<>(allMods.size());
 
 		for (ModCandidate mod : preselectedMods) {
-			preselectMod(mod, allModsSorted, modsById, selectedMods, uniqueSelectedMods);
+			preselectMod(mod, allMods, modsById, selectedMods, uniqueSelectedMods);
 		}
 
 		// solve
@@ -128,7 +135,7 @@ public class ModResolver {
 		ModSolver.Result result;
 
 		try {
-			result = ModSolver.solve(allModsSorted, modsById,
+			result = ModSolver.solve(allMods, modsById,
 					selectedMods, uniqueSelectedMods);
 		} catch (ContradictionException | TimeoutException e) {
 			throw new ModResolutionException("Solving failed", e);
@@ -165,7 +172,7 @@ public class ModResolver {
 
 		Queue<ModCandidate> queue = new ArrayDeque<>();
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			if (selectedMods.get(mod.getId()) == mod) { // mod is selected
 				if (!mod.resetMinNestLevel()) { // -> is root
 					queue.add(mod);
@@ -221,9 +228,9 @@ public class ModResolver {
 				return 1; // only b is root
 			}
 
-			// sort id desc
-			int idCmp = a.getId().compareTo(b.getId());
-			if (idCmp != 0) return idCmp;
+//			// sort id desc
+//			int idCmp = a.getId().compareTo(b.getId());
+//			if (idCmp != 0) return idCmp;
 
 			// sort version desc (lower version later)
 			int versionCmp = b.getVersion().compareTo(a.getVersion());
@@ -252,14 +259,14 @@ public class ModResolver {
 		}
 	};
 
-	static void preselectMod(ModCandidate mod, List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
+	static void preselectMod(ModCandidate mod, Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods) throws ModResolutionException {
 		selectMod(mod, selectedMods, uniqueSelectedMods);
 
-		allModsSorted.removeAll(modsById.remove(mod.getId()));
+		allMods.removeAll(modsById.remove(mod.getId()));
 
 		for (String provided : mod.getProvides()) {
-			allModsSorted.removeAll(modsById.remove(provided));
+			allMods.removeAll(modsById.remove(provided));
 		}
 	}
 

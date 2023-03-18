@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.stream.Collectors;
 
 import net.fabricmc.api.EnvType;
@@ -47,7 +49,7 @@ final class ResultAnalyzer {
 	private static final boolean SHOW_INACTIVE = false;
 
 	@SuppressWarnings("unused")
-	static String gatherErrors(ModSolver.Result result, Map<String, ModCandidate> selectedMods, Map<String, List<ModCandidate>> modsById,
+	static String gatherErrors(ModSolver.Result result, Map<String, ModCandidate> selectedMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, Set<ModCandidate>> envDisabledMods, EnvType envType) {
 		StringWriter sw = new StringWriter();
 
@@ -76,7 +78,7 @@ final class ResultAnalyzer {
 				if (selected != null) {
 					matches.add(selected);
 				} else {
-					List<ModCandidate> candidates = modsById.get(dep.getModId());
+					SortedSet<ModCandidate> candidates = modsById.get(dep.getModId());
 					if (candidates != null) matches.addAll(candidates);
 				}
 
@@ -122,7 +124,7 @@ final class ResultAnalyzer {
 	}
 
 	private static void formatFix(ModSolver.Fix fix,
-			ModSolver.Result result, Map<String, ModCandidate> selectedMods, Map<String, List<ModCandidate>> modsById,
+			ModSolver.Result result, Map<String, ModCandidate> selectedMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, Set<ModCandidate>> envDisabledMods, EnvType envType,
 			PrintWriter pw) {
 		for (AddModVar mod : fix.modsToAdd) {
@@ -159,8 +161,8 @@ final class ResultAnalyzer {
 				if (alt != null) {
 					newModName = getName(alt);
 				} else {
-					List<ModCandidate> alts = modsById.get(newMod.getId());
-					if (alts != null && !alts.isEmpty()) newModName = getName(alts.get(0));
+					SortedSet<ModCandidate> alts = modsById.get(newMod.getId());
+					if (alts != null && !alts.isEmpty()) newModName = getName(alts.iterator().next());
 				}
 
 				pw.printf("\n\t - %s", Localization.format("resolution.solution.replaceMod",

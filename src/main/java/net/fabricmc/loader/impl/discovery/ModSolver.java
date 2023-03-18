@@ -29,6 +29,9 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.function.Function;
 
 import org.sat4j.pb.IPBSolver;
@@ -52,14 +55,22 @@ import net.fabricmc.loader.impl.util.version.SemanticVersionImpl;
 import net.fabricmc.loader.impl.util.version.VersionPredicateParser;
 
 final class ModSolver {
-	static Result solve(List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
+	static Result solve(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods) throws ContradictionException, TimeoutException, ModResolutionException {
 		// build priority index
 
-		Map<ModCandidate, Integer> priorities = new IdentityHashMap<>(allModsSorted.size());
+		Map<String, Map<ModCandidate, Integer>> priorities = new HashMap<>(modsById.size());
 
-		for (int i = 0; i < allModsSorted.size(); i++) {
-			priorities.put(allModsSorted.get(i), i);
+		for (Map.Entry<String, SortedSet<ModCandidate>> entry : modsById.entrySet()) {
+			String id = entry.getKey();
+			SortedSet<ModCandidate> candidates = entry.getValue();
+			Map<ModCandidate, Integer> priorityMap = new IdentityHashMap<>(candidates.size());
+			priorities.put(id, priorityMap);
+			int i = 0;
+			for (ModCandidate candidate : candidates) {
+				priorityMap.put(candidate, i);
+				i++;
+			}
 		}
 
 		// create and configure solver
@@ -73,7 +84,7 @@ final class ModSolver {
 
 		DependencyHelper<DomainObject, Explanation> dependencyHelper = createDepHelper(solver);
 
-		setupSolver(allModsSorted, modsById,
+		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				false, null, false,
 				dependencyHelper);
@@ -112,7 +123,7 @@ final class ModSolver {
 			Set<ModDependency> failedDeps = Collections.newSetFromMap(new IdentityHashMap<>());
 			List<Explanation> failedExplanations = new ArrayList<>();
 
-			computeFailureCausesOptional(allModsSorted, modsById,
+			computeFailureCausesOptional(allMods, modsById,
 					priorities, selectedMods, uniqueSelectedMods,
 					reason, dependencyHelper,
 					failedDeps, failedExplanations);
@@ -121,7 +132,7 @@ final class ModSolver {
 
 			fixSetupTime = System.nanoTime();
 
-			Fix fix = computeFix(uniqueSelectedMods, allModsSorted, modsById,
+			Fix fix = computeFix(uniqueSelectedMods, allMods, modsById,
 					priorities, selectedMods,
 					failedDeps, dependencyHelper);
 
@@ -159,14 +170,14 @@ final class ModSolver {
 		}
 	}
 
-	private static void computeFailureCausesOptional(List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
-			Map<ModCandidate, Integer> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
+	private static void computeFailureCausesOptional(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
+		    Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
 			Set<Explanation> reason, DependencyHelper<DomainObject, Explanation> dependencyHelper,
 			Set<ModDependency> failedDeps, List<Explanation> failedExplanations) throws ContradictionException, TimeoutException {
 		dependencyHelper.reset();
 		dependencyHelper = createDepHelper(dependencyHelper.getSolver()); // dependencyHelper.reset doesn't fully reset the dep helper
 
-		setupSolver(allModsSorted, modsById,
+		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				true, null, false,
 				dependencyHelper);
@@ -203,8 +214,8 @@ final class ModSolver {
 		}
 	}
 
-	private static Fix computeFix(List<ModCandidate> uniqueSelectedMods, List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
-			Map<ModCandidate, Integer> priorities, Map<String, ModCandidate> selectedMods,
+	private static Fix computeFix(List<ModCandidate> uniqueSelectedMods, Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
+			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
 			Set<ModDependency> failedDeps, DependencyHelper<DomainObject, Explanation> dependencyHelper) throws ContradictionException, TimeoutException {
 		// group positive deps by mod id
 		Map<String, Set<Collection<VersionPredicate>>> depsById = new HashMap<>();
@@ -219,7 +230,7 @@ final class ModSolver {
 
 		Set<String> modsWithOnlyOutboundDepFailures = new HashSet<>();
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			if (!mod.getDependencies().isEmpty()
 					&& !depsById.containsKey(mod.getId())
 					&& !Collections.disjoint(mod.getDependencies(), failedDeps)) { // mod has unsatisfied deps
@@ -230,7 +241,7 @@ final class ModSolver {
 
 		// add deps that didn't fail to find all relevant boundary versions to test
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			for (ModDependency dep : mod.getDependencies()) {
 				if (dep.getKind() != ModDependency.Kind.DEPENDS) continue;
 
@@ -244,7 +255,7 @@ final class ModSolver {
 
 		// determine mod versions to try to add
 
-		Map<String, List<AddModVar>> installableMods = new HashMap<>();
+		Map<String, SortedSet<AddModVar>> installableMods = new HashMap<>();
 
 		for (Map.Entry<String, Set<Collection<VersionPredicate>>> entry : depsById.entrySet()) {
 			String id = entry.getKey();
@@ -285,7 +296,7 @@ final class ModSolver {
 				versions.add(deriveVersion(interval));
 			}
 
-			List<AddModVar> out = installableMods.computeIfAbsent(id, ignore -> new ArrayList<>());
+			SortedSet<AddModVar> out = installableMods.computeIfAbsent(id, ignore -> new TreeSet<>(Comparator.<AddModVar, Version>comparing(AddModVar::getVersion).reversed()));
 
 			if (commonInterval != null) {
 				out.add(new AddModVar(id, deriveVersion(commonInterval), hadOnlyOutboundDepFailures));
@@ -294,8 +305,6 @@ final class ModSolver {
 					out.add(new AddModVar(id, version, hadOnlyOutboundDepFailures));
 				}
 			}
-
-			out.sort(Comparator.<AddModVar, Version>comparing(AddModVar::getVersion).reversed());
 		}
 
 		// check the determined solution
@@ -305,7 +314,7 @@ final class ModSolver {
 		dependencyHelper.reset();
 		dependencyHelper = createDepHelper(dependencyHelper.getSolver()); // dependencyHelper.reset doesn't fully reset the dep helper
 
-		setupSolver(allModsSorted, modsById,
+		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				false, installableMods, true,
 				dependencyHelper);
@@ -316,12 +325,12 @@ final class ModSolver {
 		}
 
 		Map<String, ModCandidate> activeMods = new HashMap<>();
-		Map<ModCandidate, InactiveReason> inactiveMods = new IdentityHashMap<>(allModsSorted.size());
+		Map<ModCandidate, InactiveReason> inactiveMods = new IdentityHashMap<>(allMods.size());
 		List<AddModVar> modsToAdd = new ArrayList<>();
 		List<ModCandidate> modsToRemove = new ArrayList<>();
 		Map<AddModVar, List<ModCandidate>> modReplacements = new HashMap<>();
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			inactiveMods.put(mod, InactiveReason.UNKNOWN);
 		}
 
@@ -338,7 +347,7 @@ final class ModSolver {
 				ModCandidate selectedMod = selectedMods.get(obj.getId());
 				if (selectedMod != null) replaced.add(selectedMod);
 
-				List<ModCandidate> mods = modsById.get(obj.getId());
+				SortedSet<ModCandidate> mods = modsById.get(obj.getId());
 				if (mods != null) replaced.addAll(mods);
 
 				if (replaced.isEmpty()) {
@@ -361,7 +370,7 @@ final class ModSolver {
 					found = true;
 				}
 
-				List<ModCandidate> mods = modsById.get(obj.getId());
+				SortedSet<ModCandidate> mods = modsById.get(obj.getId());
 
 				if (mods != null) {
 					for (ModCandidate m : mods) {
@@ -410,7 +419,8 @@ final class ModSolver {
 			ModCandidate active = activeMods.get(mod.getId());
 
 			if (active != null) {
-				if (allModsSorted.indexOf(mod) > allModsSorted.indexOf(active)) { // entry has lower prio (=higher index) than active
+				Map<ModCandidate, Integer> priorityMap = priorities.get(mod.getId());
+				if (priorityMap.get(mod) > priorityMap.get(active)) { // entry has lower prio (=higher index) than active
 					if (mod.getVersion().equals(active.getVersion())) {
 						entry.setValue(InactiveReason.SAME_ACTIVE);
 					} else {
@@ -561,9 +571,9 @@ final class ModSolver {
 		}
 	}
 
-	private static void setupSolver(List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
-			Map<ModCandidate, Integer> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
-			boolean depDisableSim, Map<String, List<AddModVar>> installableMods, boolean removalSim,
+	private static void setupSolver(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
+			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
+			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
 			DependencyHelper<DomainObject, Explanation> dependencyHelper) throws ContradictionException {
 		Map<String, DomainObject> dummies = new HashMap<>();
 		Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps = depDisableSim ? new HashMap<>() : null;
@@ -575,7 +585,7 @@ final class ModSolver {
 				dummies, disabledDeps,
 				dependencyHelper, weightedObjects);
 
-		generateMainConstraints(allModsSorted, modsById,
+		generateMainConstraints(allMods, modsById,
 				priorities, selectedMods,
 				depDisableSim, installableMods, removalSim,
 				dummies, disabledDeps,
@@ -591,9 +601,9 @@ final class ModSolver {
 		//dependencyHelper.addWeightedCriterion(weightedObjects);
 	}
 
-	private static void generatePreselectConstraints(List<ModCandidate> uniqueSelectedMods, Map<String, List<ModCandidate>> modsById,
-			Map<ModCandidate, Integer> priorities, Map<String, ModCandidate> selectedMods,
-			boolean depDisableSim, Map<String, List<AddModVar>> installableMods, boolean removalSim,
+	private static void generatePreselectConstraints(List<ModCandidate> uniqueSelectedMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
+			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
+			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
 			Map<String, DomainObject> dummyMods, Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps,
 			DependencyHelper<DomainObject, Explanation> dependencyHelper, List<WeightedObject<DomainObject>> weightedObjects) throws ContradictionException {
 		boolean enableOptional = !depDisableSim && installableMods == null && !removalSim; // whether to enable optional mods (regular solve only, not for failure handling)
@@ -606,7 +616,7 @@ final class ModSolver {
 				if (!enableOptional && dep.getKind().isSoft()) continue;
 				if (selectedMods.containsKey(dep.getModId())) continue;
 
-				List<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
+				SortedSet<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
 
 				if (availableMods != null) {
 					for (DomainObject.Mod m : availableMods) {
@@ -670,9 +680,9 @@ final class ModSolver {
 				int prio = priorities.size() + 10;
 
 				if (installableMods != null) {
-					prio += installableMods.getOrDefault(mod.getId(), Collections.emptyList()).size();
+					prio += installableMods.getOrDefault(mod.getId(), Collections.emptySortedSet()).size();
 
-					List<AddModVar> installable = installableMods.get(mod.getId());
+					SortedSet<AddModVar> installable = installableMods.get(mod.getId());
 					if (installable != null) suitableMods.addAll(installable);
 				}
 
@@ -685,15 +695,15 @@ final class ModSolver {
 		}
 	}
 
-	private static void generateMainConstraints(List<ModCandidate> allModsSorted, Map<String, List<ModCandidate>> modsById,
-			Map<ModCandidate, Integer> priorities, Map<String, ModCandidate> selectedMods,
-			boolean depDisableSim, Map<String, List<AddModVar>> installableMods, boolean removalSim,
+	private static void generateMainConstraints(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
+			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
+			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
 			Map<String, DomainObject> dummyMods, Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps,
 			DependencyHelper<DomainObject, Explanation> dependencyHelper, List<WeightedObject<DomainObject>> weightedObjects) throws ContradictionException {
 		boolean enableOptional = !depDisableSim && installableMods == null && !removalSim; // whether to enable optional mods (regular solve only, not for failure handling)
 		List<DomainObject> suitableMods = new ArrayList<>();
 
-		for (ModCandidate mod : allModsSorted) {
+		for (ModCandidate mod : allMods) {
 			// add constraints for dependencies
 
 			for (ModDependency dep : mod.getDependencies()) {
@@ -718,7 +728,7 @@ final class ModSolver {
 					}
 				}
 
-				List<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
+				SortedSet<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
 
 				if (availableMods != null) {
 					for (DomainObject.Mod m : availableMods) {
@@ -816,13 +826,13 @@ final class ModSolver {
 			// add weights if potentially needed (choice between multiple mods or dummies)
 
 			if (!mod.isRoot() || mod.getLoadCondition() != ModLoadCondition.ALWAYS || modsById.get(mod.getId()).size() > 1) {
-				int prio = priorities.get(mod);
+				int prio = priorities.get(mod.getId()).get(mod);
 				BigInteger weight;
 
 				if (mod.getLoadCondition().ordinal() >= ModLoadCondition.IF_RECOMMENDED.ordinal()) { // non-greedy (optional)
 					weight = TWO.pow(prio + 1);
 				} else { // greedy
-					weight = TWO.pow(allModsSorted.size() - prio).negate();
+					weight = TWO.pow(allMods.size() - prio).negate();
 				}
 
 				weightedObjects.add(WeightedObject.newWO(mod, weight));
@@ -832,8 +842,8 @@ final class ModSolver {
 		// add constraints to force-load root mods (ALWAYS only, IF_POSSIBLE is being handled through negative weight later)
 		// add single mod per id constraints
 
-		for (List<ModCandidate> variants : modsById.values()) {
-			ModCandidate firstMod = variants.get(0);
+		for (SortedSet<ModCandidate> variants : modsById.values()) {
+			ModCandidate firstMod = variants.first();
 			String id = firstMod.getId();
 
 			// force-load root mod
@@ -855,13 +865,13 @@ final class ModSolver {
 				if (isRequired) {
 					if (removalSim) {
 						int prio = priorities.size() + 10;
-						if (installableMods != null) prio += installableMods.getOrDefault(id, Collections.emptyList()).size();
+						if (installableMods != null) prio += installableMods.getOrDefault(id, Collections.emptySortedSet()).size();
 
 						suitableMods.add(getCreateDummy(id, RemoveModVar::new, dummyMods, prio, weightedObjects));
 					}
 
 					if (installableMods != null) {
-						List<AddModVar> installable = installableMods.get(id);
+						SortedSet<AddModVar> installable = installableMods.get(id);
 						if (installable != null) suitableMods.addAll(installable);
 					}
 
@@ -877,7 +887,7 @@ final class ModSolver {
 			suitableMods.addAll(variants);
 
 			if (installableMods != null) {
-				List<AddModVar> installable = installableMods.get(id);
+				SortedSet<AddModVar> installable = installableMods.get(id);
 
 				if (installable != null && !installable.isEmpty()) {
 					suitableMods.addAll(installable);
@@ -898,8 +908,8 @@ final class ModSolver {
 		// add weights and missing unique id constraints for installable mods
 
 		if (installableMods != null) {
-			for (List<AddModVar> variants : installableMods.values()) {
-				String id = variants.get(0).getId();
+			for (SortedSet<AddModVar> variants : installableMods.values()) {
+				String id = variants.first().getId();
 				boolean isReplacement = modsById.containsKey(id);
 
 				if (!isReplacement) { // no single mod per id constraint created yet
@@ -915,13 +925,14 @@ final class ModSolver {
 					suitableMods.clear();
 				}
 
-				for (int i = 0; i < variants.size(); i++) {
-					AddModVar mod = variants.get(i);
+				int i = 0;
+				for (AddModVar mod : variants) {
 					int weight = priorities.size() + 4 + i;
 					if (isReplacement) weight += 3;
 					if (mod.hadOnlyOutboundDepFailures) weight++;
 
 					weightedObjects.add(WeightedObject.newWO(mod, TWO.pow(weight)));
+					i++;
 				}
 			}
 		}
