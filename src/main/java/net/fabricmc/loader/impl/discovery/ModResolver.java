@@ -55,15 +55,9 @@ public class ModResolver {
 	}
 
 	private static List<ModCandidate> findCompatibleSet(Collection<ModCandidate> candidates, EnvType envType, Map<String, Set<ModCandidate>> envDisabledMods) throws ModResolutionException {
-		// sort all mods by priority
-
-//		List<ModCandidate> allModsSorted = new ArrayList<>(candidates);
-//
-//		allModsSorted.sort(modPrioComparator);
-
 		// group/index all mods by id
 
-		SortedMap<String, SortedSet<ModCandidate>> modsById = new TreeMap<>(); // linked to ensure consistent execution
+		SortedMap<String, SortedSet<ModCandidate>> modsById = new TreeMap<>();
 
 		for (ModCandidate mod : candidates) {
 			modsById.computeIfAbsent(mod.getId(), ignore -> new TreeSet<>(modPrioComparator)).add(mod);
@@ -226,10 +220,6 @@ public class ModResolver {
 			} else if (b.isRoot()) {
 				return 1; // only b is root
 			}
-
-//			// sort id desc
-//			int idCmp = a.getId().compareTo(b.getId());
-//			if (idCmp != 0) return idCmp;
 
 			// sort version desc (lower version later)
 			int versionCmp = b.getVersion().compareTo(a.getVersion());

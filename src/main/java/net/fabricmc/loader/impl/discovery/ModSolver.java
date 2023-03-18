@@ -297,7 +297,7 @@ final class ModSolver {
 				versions.add(deriveVersion(interval));
 			}
 
-			SortedSet<AddModVar> out = installableMods.computeIfAbsent(id, ignore -> new TreeSet<>(Comparator.<AddModVar, Version>comparing(AddModVar::getVersion).reversed()));
+			SortedSet<AddModVar> out = installableMods.computeIfAbsent(id, ignore -> new TreeSet<>(Comparator.comparing(AddModVar::getVersion).reversed()));
 
 			if (commonInterval != null) {
 				out.add(new AddModVar(id, deriveVersion(commonInterval), hadOnlyOutboundDepFailures));
@@ -596,9 +596,6 @@ final class ModSolver {
 			applyDisableDepVarWeights(disabledDeps, priorities.size(), weightedObjects);
 		}
 
-//		@SuppressWarnings("unchecked")
-//		WeightedObject<DomainObject>[] weights = weightedObjects.toArray(new WeightedObject[0]);
-//		lexicoHelper.setObjectiveFunction(weights);
 		weightedObjects.values().forEach(lexicoHelper::addWeightedCriterion);
 	}
 

@@ -162,7 +162,7 @@ final class ResultAnalyzer {
 					newModName = getName(alt);
 				} else {
 					SortedSet<ModCandidate> alts = modsById.get(newMod.getId());
-					if (alts != null && !alts.isEmpty()) newModName = getName(alts.iterator().next());
+					if (alts != null && !alts.isEmpty()) newModName = getName(alts.first());
 				}
 
 				pw.printf("\n\t - %s", Localization.format("resolution.solution.replaceMod",
