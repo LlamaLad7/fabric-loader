@@ -31,12 +31,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.SortedSet;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Function;
 
 import org.sat4j.pb.IPBSolver;
 import org.sat4j.pb.SolverFactory;
-import org.sat4j.pb.tools.DependencyHelper;
+import org.sat4j.pb.tools.LexicoHelper;
 import org.sat4j.pb.tools.INegator;
 import org.sat4j.pb.tools.WeightedObject;
 import org.sat4j.specs.ContradictionException;
@@ -82,25 +83,25 @@ final class ModSolver {
 		int timeout = Integer.getInteger(SystemProperties.DEBUG_RESOLUTION_TIMEOUT, 60);
 		if (timeout > 0) solver.setTimeout(timeout); // in seconds
 
-		DependencyHelper<DomainObject, Explanation> dependencyHelper = createDepHelper(solver);
+		LexicoHelper<DomainObject, Explanation> lexicoHelper = createLexicoHelper(solver);
 
 		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				false, null, false,
-				dependencyHelper);
+				lexicoHelper);
 
 		// solve
 
 		solveTime = System.nanoTime();
 
-		boolean hasSolution = dependencyHelper.hasASolution();
+		boolean hasSolution = lexicoHelper.hasASolution();
 
 		// check solution
 
 		solutionFetchTime = System.nanoTime();
 
 		if (hasSolution) {
-			Collection<DomainObject> solution = dependencyHelper.getASolution();
+			Collection<DomainObject> solution = lexicoHelper.getASolution();
 
 			solutionAnalyzeTime = System.nanoTime();
 
@@ -112,11 +113,11 @@ final class ModSolver {
 				}
 			}
 
-			dependencyHelper.reset();
+			lexicoHelper.reset();
 
 			return Result.createSuccess();
 		} else { // no solution
-			Set<Explanation> reason = dependencyHelper.why();
+			Set<Explanation> reason = lexicoHelper.why();
 
 			// gather all failed deps
 
@@ -125,7 +126,7 @@ final class ModSolver {
 
 			computeFailureCausesOptional(allMods, modsById,
 					priorities, selectedMods, uniqueSelectedMods,
-					reason, dependencyHelper,
+					reason, lexicoHelper,
 					failedDeps, failedExplanations);
 
 			// find best solution with mod addition/removal
@@ -134,9 +135,9 @@ final class ModSolver {
 
 			Fix fix = computeFix(uniqueSelectedMods, allMods, modsById,
 					priorities, selectedMods,
-					failedDeps, dependencyHelper);
+					failedDeps, lexicoHelper);
 
-			dependencyHelper.reset();
+			lexicoHelper.reset();
 
 			return Result.createFailure(reason, failedExplanations, fix);
 		}
@@ -172,18 +173,18 @@ final class ModSolver {
 
 	private static void computeFailureCausesOptional(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 		    Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
-			Set<Explanation> reason, DependencyHelper<DomainObject, Explanation> dependencyHelper,
+			Set<Explanation> reason, LexicoHelper<DomainObject, Explanation> lexicoHelper,
 			Set<ModDependency> failedDeps, List<Explanation> failedExplanations) throws ContradictionException, TimeoutException {
-		dependencyHelper.reset();
-		dependencyHelper = createDepHelper(dependencyHelper.getSolver()); // dependencyHelper.reset doesn't fully reset the dep helper
+		lexicoHelper.reset();
+		lexicoHelper = createLexicoHelper(lexicoHelper.getSolver()); // lexicoHelper.reset doesn't fully reset the dep helper
 
 		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				true, null, false,
-				dependencyHelper);
+				lexicoHelper);
 
-		if (dependencyHelper.hasASolution()) {
-			Collection<DomainObject> solution = dependencyHelper.getASolution();
+		if (lexicoHelper.hasASolution()) {
+			Collection<DomainObject> solution = lexicoHelper.getASolution();
 			Set<ModDependency> disabledDeps = new HashSet<>(); // DisableDepVar uses equality semantics, not identity
 
 			for (DomainObject obj : solution) {
@@ -216,7 +217,7 @@ final class ModSolver {
 
 	private static Fix computeFix(List<ModCandidate> uniqueSelectedMods, Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
-			Set<ModDependency> failedDeps, DependencyHelper<DomainObject, Explanation> dependencyHelper) throws ContradictionException, TimeoutException {
+			Set<ModDependency> failedDeps, LexicoHelper<DomainObject, Explanation> lexicoHelper) throws ContradictionException, TimeoutException {
 		// group positive deps by mod id
 		Map<String, Set<Collection<VersionPredicate>>> depsById = new HashMap<>();
 
@@ -311,16 +312,16 @@ final class ModSolver {
 
 		fixSolveTime = System.nanoTime();
 
-		dependencyHelper.reset();
-		dependencyHelper = createDepHelper(dependencyHelper.getSolver()); // dependencyHelper.reset doesn't fully reset the dep helper
+		lexicoHelper.reset();
+		lexicoHelper = createLexicoHelper(lexicoHelper.getSolver()); // lexicoHelper.reset doesn't fully reset the dep helper
 
 		setupSolver(allMods, modsById,
 				priorities, selectedMods, uniqueSelectedMods,
 				false, installableMods, true,
-				dependencyHelper);
+				lexicoHelper);
 
-		if (!dependencyHelper.hasASolution()) {
-			Log.warn(LogCategory.RESOLUTION, "Unable to find a solution to fix the mod set, reason: %s", dependencyHelper.why());
+		if (!lexicoHelper.hasASolution()) {
+			Log.warn(LogCategory.RESOLUTION, "Unable to find a solution to fix the mod set, reason: %s", lexicoHelper.why());
 			return null;
 		}
 
@@ -334,7 +335,7 @@ final class ModSolver {
 			inactiveMods.put(mod, InactiveReason.UNKNOWN);
 		}
 
-		for (DomainObject obj : dependencyHelper.getASolution()) {
+		for (DomainObject obj : lexicoHelper.getASolution()) {
 			if (obj instanceof ModCandidate) {
 				ModCandidate mod = (ModCandidate) obj;
 
@@ -574,38 +575,38 @@ final class ModSolver {
 	private static void setupSolver(Set<ModCandidate> allMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods, List<ModCandidate> uniqueSelectedMods,
 			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
-			DependencyHelper<DomainObject, Explanation> dependencyHelper) throws ContradictionException {
+			LexicoHelper<DomainObject, Explanation> lexicoHelper) throws ContradictionException {
 		Map<String, DomainObject> dummies = new HashMap<>();
 		Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps = depDisableSim ? new HashMap<>() : null;
-		List<WeightedObject<DomainObject>> weightedObjects = new ArrayList<>();
+		Map<String, List<WeightedObject<DomainObject>>> weightedObjects = new TreeMap<>();
 
 		generatePreselectConstraints(uniqueSelectedMods, modsById,
 				priorities, selectedMods,
 				depDisableSim, installableMods, removalSim,
 				dummies, disabledDeps,
-				dependencyHelper, weightedObjects);
+				lexicoHelper, weightedObjects);
 
 		generateMainConstraints(allMods, modsById,
 				priorities, selectedMods,
 				depDisableSim, installableMods, removalSim,
 				dummies, disabledDeps,
-				dependencyHelper, weightedObjects);
+				lexicoHelper, weightedObjects);
 
 		if (depDisableSim) {
 			applyDisableDepVarWeights(disabledDeps, priorities.size(), weightedObjects);
 		}
 
-		@SuppressWarnings("unchecked")
-		WeightedObject<DomainObject>[] weights = weightedObjects.toArray(new WeightedObject[0]);
-		dependencyHelper.setObjectiveFunction(weights);
-		//dependencyHelper.addWeightedCriterion(weightedObjects);
+//		@SuppressWarnings("unchecked")
+//		WeightedObject<DomainObject>[] weights = weightedObjects.toArray(new WeightedObject[0]);
+//		lexicoHelper.setObjectiveFunction(weights);
+		weightedObjects.values().forEach(lexicoHelper::addWeightedCriterion);
 	}
 
 	private static void generatePreselectConstraints(List<ModCandidate> uniqueSelectedMods, SortedMap<String, SortedSet<ModCandidate>> modsById,
 			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
 			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
 			Map<String, DomainObject> dummyMods, Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps,
-			DependencyHelper<DomainObject, Explanation> dependencyHelper, List<WeightedObject<DomainObject>> weightedObjects) throws ContradictionException {
+			LexicoHelper<DomainObject, Explanation> lexicoHelper, Map<String, List<WeightedObject<DomainObject>>> weightedObjects) throws ContradictionException {
 		boolean enableOptional = !depDisableSim && installableMods == null && !removalSim; // whether to enable optional mods (regular solve only, not for failure handling)
 		List<DomainObject> suitableMods = new ArrayList<>();
 
@@ -642,7 +643,7 @@ final class ModSolver {
 						suitableMods.add(getCreateDisableDepVar(dep, disabledDeps));
 					}
 
-					dependencyHelper.clause(new Explanation(ErrorKind.PRESELECT_HARD_DEP, mod, dep), suitableMods.toArray(new DomainObject[0]));
+					lexicoHelper.clause(new Explanation(ErrorKind.PRESELECT_HARD_DEP, mod, dep), suitableMods.toArray(new DomainObject[0]));
 					break;
 				case RECOMMENDS:
 					// this will prioritize greedy over non-greedy loaded mods, regardless of modPrioComparator due to the objective weights
@@ -652,16 +653,16 @@ final class ModSolver {
 
 					if (!suitableMods.isEmpty()) {
 						suitableMods.add(getCreateDummy(dep.getModId(), OptionalDepVar::new, dummyMods, priorities.size(), weightedObjects));
-						dependencyHelper.clause(new Explanation(ErrorKind.PRESELECT_SOFT_DEP, mod, dep), suitableMods.toArray(new DomainObject[0]));
+						lexicoHelper.clause(new Explanation(ErrorKind.PRESELECT_SOFT_DEP, mod, dep), suitableMods.toArray(new DomainObject[0]));
 					}
 
 					break;
 				case BREAKS:
 					if (depDisableSim) {
-						dependencyHelper.setTrue(getCreateDisableDepVar(dep, disabledDeps), new Explanation(ErrorKind.PRESELECT_NEG_HARD_DEP, mod, dep));
+						lexicoHelper.setTrue(getCreateDisableDepVar(dep, disabledDeps), new Explanation(ErrorKind.PRESELECT_NEG_HARD_DEP, mod, dep));
 					} else {
 						for (DomainObject match : suitableMods) {
-							dependencyHelper.setFalse(match, new Explanation(ErrorKind.PRESELECT_NEG_HARD_DEP, mod, dep));
+							lexicoHelper.setFalse(match, new Explanation(ErrorKind.PRESELECT_NEG_HARD_DEP, mod, dep));
 						}
 					}
 
@@ -689,7 +690,7 @@ final class ModSolver {
 				suitableMods.add(getCreateDummy(mod.getId(), RemoveModVar::new, dummyMods, prio, weightedObjects));
 				suitableMods.add(mod);
 
-				dependencyHelper.clause(new Explanation(ErrorKind.PRESELECT_FORCELOAD, mod.getId()), suitableMods.toArray(new DomainObject[0]));
+				lexicoHelper.clause(new Explanation(ErrorKind.PRESELECT_FORCELOAD, mod.getId()), suitableMods.toArray(new DomainObject[0]));
 				suitableMods.clear();
 			}
 		}
@@ -699,143 +700,146 @@ final class ModSolver {
 			Map<String, Map<ModCandidate, Integer>> priorities, Map<String, ModCandidate> selectedMods,
 			boolean depDisableSim, Map<String, SortedSet<AddModVar>> installableMods, boolean removalSim,
 			Map<String, DomainObject> dummyMods, Map<ModDependency, Map.Entry<DomainObject, Integer>> disabledDeps,
-			DependencyHelper<DomainObject, Explanation> dependencyHelper, List<WeightedObject<DomainObject>> weightedObjects) throws ContradictionException {
+			LexicoHelper<DomainObject, Explanation> lexicoHelper, Map<String, List<WeightedObject<DomainObject>>> weightedObjects) throws ContradictionException {
 		boolean enableOptional = !depDisableSim && installableMods == null && !removalSim; // whether to enable optional mods (regular solve only, not for failure handling)
 		List<DomainObject> suitableMods = new ArrayList<>();
 
-		for (ModCandidate mod : allMods) {
-			// add constraints for dependencies
+		for (Map.Entry<String, SortedSet<ModCandidate>> modEntry : modsById.entrySet()) {
+			String modId = modEntry.getKey();
+			for (ModCandidate mod : modEntry.getValue()) {
+				// add constraints for dependencies
 
-			for (ModDependency dep : mod.getDependencies()) {
-				if (!enableOptional && dep.getKind().isSoft()) continue;
+				for (ModDependency dep : mod.getDependencies()) {
+					if (!enableOptional && dep.getKind().isSoft()) continue;
 
-				ModCandidate selectedMod = selectedMods.get(dep.getModId());
+					ModCandidate selectedMod = selectedMods.get(dep.getModId());
 
-				if (selectedMod != null) { // dep is already selected = present
-					if (!removalSim) {
-						if (!dep.getKind().isSoft() // .. and is a hard dep
-								&& dep.matches(selectedMod.getVersion()) != dep.getKind().isPositive()) { // ..but isn't suitable (DEPENDS without match or BREAKS with match)
-							if (depDisableSim) {
-								dependencyHelper.setTrue(getCreateDisableDepVar(dep, disabledDeps), new Explanation(ErrorKind.HARD_DEP, mod, dep));
-							} else {
-								dependencyHelper.setFalse(mod, new Explanation(ErrorKind.HARD_DEP_INCOMPATIBLE_PRESELECTED, mod, dep));
+					if (selectedMod != null) { // dep is already selected = present
+						if (!removalSim) {
+							if (!dep.getKind().isSoft() // .. and is a hard dep
+									&& dep.matches(selectedMod.getVersion()) != dep.getKind().isPositive()) { // ..but isn't suitable (DEPENDS without match or BREAKS with match)
+								if (depDisableSim) {
+									lexicoHelper.setTrue(getCreateDisableDepVar(dep, disabledDeps), new Explanation(ErrorKind.HARD_DEP, mod, dep));
+								} else {
+									lexicoHelper.setFalse(mod, new Explanation(ErrorKind.HARD_DEP_INCOMPATIBLE_PRESELECTED, mod, dep));
+								}
 							}
+
+							continue;
+						} else if (dep.matches(selectedMod.getVersion())) {
+							suitableMods.add(selectedMod);
 						}
-
-						continue;
-					} else if (dep.matches(selectedMod.getVersion())) {
-						suitableMods.add(selectedMod);
 					}
-				}
 
-				SortedSet<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
-
-				if (availableMods != null) {
-					for (DomainObject.Mod m : availableMods) {
-						if (dep.matches(m.getVersion())) suitableMods.add(m);
-					}
-				}
-
-				if (installableMods != null) {
-					availableMods = installableMods.get(dep.getModId());
+					SortedSet<? extends DomainObject.Mod> availableMods = modsById.get(dep.getModId());
 
 					if (availableMods != null) {
 						for (DomainObject.Mod m : availableMods) {
 							if (dep.matches(m.getVersion())) suitableMods.add(m);
 						}
 					}
+
+					if (installableMods != null) {
+						availableMods = installableMods.get(dep.getModId());
+
+						if (availableMods != null) {
+							for (DomainObject.Mod m : availableMods) {
+								if (dep.matches(m.getVersion())) suitableMods.add(m);
+							}
+						}
+					}
+
+					switch (dep.getKind()) {
+						case DEPENDS: // strong dep
+							if (depDisableSim) {
+								suitableMods.add(getCreateDisableDepVar(dep, disabledDeps));
+							}
+
+							if (suitableMods.isEmpty()) {
+								lexicoHelper.setFalse(mod, new Explanation(ErrorKind.HARD_DEP_NO_CANDIDATE, mod, dep));
+							} else {
+								lexicoHelper.implication(mod).implies(suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.HARD_DEP, mod, dep));
+							}
+
+							break;
+						case RECOMMENDS: // soft dep
+							// this will prioritize greedy over non-greedy loaded mods, regardless of modPrioComparator due to the objective weights
+
+							// only pull IF_RECOMMENDED or encompassing in
+							suitableMods.removeIf(m -> ((ModCandidate) m).getLoadCondition().ordinal() > ModLoadCondition.IF_RECOMMENDED.ordinal());
+
+							if (!suitableMods.isEmpty()) {
+								suitableMods.add(getCreateDummy(dep.getModId(), OptionalDepVar::new, dummyMods, priorities.size(), weightedObjects));
+								lexicoHelper.implication(mod).implies(suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.SOFT_DEP, mod, dep));
+							}
+
+							break;
+						case BREAKS: // strong negative dep
+							if (!suitableMods.isEmpty()) {
+								if (depDisableSim) {
+									DomainObject var = getCreateDisableDepVar(dep, disabledDeps);
+
+									for (DomainObject match : suitableMods) {
+										lexicoHelper.implication(mod).implies(new NegatedDomainObject(match), var).named(new Explanation(ErrorKind.NEG_HARD_DEP, mod, dep));
+									}
+								} else {
+									for (DomainObject match : suitableMods) {
+										lexicoHelper.implication(mod).impliesNot(match).named(new Explanation(ErrorKind.NEG_HARD_DEP, mod, dep));
+									}
+								}
+							}
+
+							break;
+						case CONFLICTS:
+							// TODO: soft negative dep?
+							break;
+						default:
+							// ignore
+					}
+
+					suitableMods.clear();
 				}
 
-				switch (dep.getKind()) {
-				case DEPENDS: // strong dep
-					if (depDisableSim) {
-						suitableMods.add(getCreateDisableDepVar(dep, disabledDeps));
-					}
+				// add constraints to select greedy nested mods (ALWAYS or IF_POSSIBLE)
+				// add constraints to restrict nested mods to selected parents
 
-					if (suitableMods.isEmpty()) {
-						dependencyHelper.setFalse(mod, new Explanation(ErrorKind.HARD_DEP_NO_CANDIDATE, mod, dep));
-					} else {
-						dependencyHelper.implication(mod).implies(suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.HARD_DEP, mod, dep));
-					}
+				if (!mod.isRoot()) { // nested mod
+					ModLoadCondition loadCondition = mod.getLoadCondition();
 
-					break;
-				case RECOMMENDS: // soft dep
-					// this will prioritize greedy over non-greedy loaded mods, regardless of modPrioComparator due to the objective weights
+					if (loadCondition == ModLoadCondition.ALWAYS) { // required with parent
+						Explanation explanation = new Explanation(ErrorKind.NESTED_FORCELOAD, mod.getParentMods().iterator().next(), mod.getId()); // FIXME: this applies to all parents
+						DomainObject[] siblings = modsById.get(mod.getId()).toArray(new DomainObject[0]);
 
-					// only pull IF_RECOMMENDED or encompassing in
-					suitableMods.removeIf(m -> ((ModCandidate) m).getLoadCondition().ordinal() > ModLoadCondition.IF_RECOMMENDED.ordinal());
-
-					if (!suitableMods.isEmpty()) {
-						suitableMods.add(getCreateDummy(dep.getModId(), OptionalDepVar::new, dummyMods, priorities.size(), weightedObjects));
-						dependencyHelper.implication(mod).implies(suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.SOFT_DEP, mod, dep));
-					}
-
-					break;
-				case BREAKS: // strong negative dep
-					if (!suitableMods.isEmpty()) {
-						if (depDisableSim) {
-							DomainObject var = getCreateDisableDepVar(dep, disabledDeps);
-
-							for (DomainObject match : suitableMods) {
-								dependencyHelper.implication(mod).implies(new NegatedDomainObject(match), var).named(new Explanation(ErrorKind.NEG_HARD_DEP, mod, dep));
-							}
+						if (isAnyParentSelected(mod, selectedMods)) {
+							lexicoHelper.clause(explanation, siblings);
 						} else {
-							for (DomainObject match : suitableMods) {
-								dependencyHelper.implication(mod).impliesNot(match).named(new Explanation(ErrorKind.NEG_HARD_DEP, mod, dep));
+							for (ModCandidate parent : mod.getParentMods()) {
+								lexicoHelper.implication(parent).implies(siblings).named(explanation);
 							}
 						}
 					}
 
-					break;
-				case CONFLICTS:
-					// TODO: soft negative dep?
-					break;
-				default:
-					// ignore
-				}
+					// require parent to be selected with the nested mod
 
-				suitableMods.clear();
-			}
-
-			// add constraints to select greedy nested mods (ALWAYS or IF_POSSIBLE)
-			// add constraints to restrict nested mods to selected parents
-
-			if (!mod.isRoot()) { // nested mod
-				ModLoadCondition loadCondition = mod.getLoadCondition();
-
-				if (loadCondition == ModLoadCondition.ALWAYS) { // required with parent
-					Explanation explanation = new Explanation(ErrorKind.NESTED_FORCELOAD, mod.getParentMods().iterator().next(), mod.getId()); // FIXME: this applies to all parents
-					DomainObject[] siblings = modsById.get(mod.getId()).toArray(new DomainObject[0]);
-
-					if (isAnyParentSelected(mod, selectedMods)) {
-						dependencyHelper.clause(explanation, siblings);
-					} else {
-						for (ModCandidate parent : mod.getParentMods()) {
-							dependencyHelper.implication(parent).implies(siblings).named(explanation);
-						}
+					if (!isAnyParentSelected(mod, selectedMods)) {
+						lexicoHelper.implication(mod).implies(mod.getParentMods().toArray(new DomainObject[0])).named(new Explanation(ErrorKind.NESTED_REQ_PARENT, mod));
 					}
 				}
 
-				// require parent to be selected with the nested mod
+				// add weights if potentially needed (choice between multiple mods or dummies)
 
-				if (!isAnyParentSelected(mod, selectedMods)) {
-					dependencyHelper.implication(mod).implies(mod.getParentMods().toArray(new DomainObject[0])).named(new Explanation(ErrorKind.NESTED_REQ_PARENT, mod));
+				if (!mod.isRoot() || mod.getLoadCondition() != ModLoadCondition.ALWAYS || modsById.get(mod.getId()).size() > 1) {
+					int prio = priorities.get(modId).get(mod);
+					BigInteger weight;
+
+					if (mod.getLoadCondition().ordinal() >= ModLoadCondition.IF_RECOMMENDED.ordinal()) { // non-greedy (optional)
+						weight = TWO.pow(prio + 1);
+					} else { // greedy
+						weight = TWO.pow(allMods.size() - prio).negate();
+					}
+
+					weightedObjects.computeIfAbsent(modId, k -> new ArrayList<>()).add(WeightedObject.newWO(mod, weight));
 				}
-			}
-
-			// add weights if potentially needed (choice between multiple mods or dummies)
-
-			if (!mod.isRoot() || mod.getLoadCondition() != ModLoadCondition.ALWAYS || modsById.get(mod.getId()).size() > 1) {
-				int prio = priorities.get(mod.getId()).get(mod);
-				BigInteger weight;
-
-				if (mod.getLoadCondition().ordinal() >= ModLoadCondition.IF_RECOMMENDED.ordinal()) { // non-greedy (optional)
-					weight = TWO.pow(prio + 1);
-				} else { // greedy
-					weight = TWO.pow(allMods.size() - prio).negate();
-				}
-
-				weightedObjects.add(WeightedObject.newWO(mod, weight));
 			}
 		}
 
@@ -850,7 +854,7 @@ final class ModSolver {
 
 			if (variants.size() == 1 && !removalSim) { // trivial case, others are handled by multi-variant impl
 				if (firstMod.isRoot() && firstMod.getLoadCondition() == ModLoadCondition.ALWAYS) {
-					dependencyHelper.setTrue(firstMod, new Explanation(ErrorKind.ROOT_FORCELOAD_SINGLE, firstMod));
+					lexicoHelper.setTrue(firstMod, new Explanation(ErrorKind.ROOT_FORCELOAD_SINGLE, firstMod));
 				}
 			} else { // complex case, potentially multiple variants
 				boolean isRequired = false;
@@ -877,7 +881,7 @@ final class ModSolver {
 
 					suitableMods.addAll(variants);
 
-					dependencyHelper.clause(new Explanation(ErrorKind.ROOT_FORCELOAD, id), suitableMods.toArray(new DomainObject[0]));
+					lexicoHelper.clause(new Explanation(ErrorKind.ROOT_FORCELOAD, id), suitableMods.toArray(new DomainObject[0]));
 					suitableMods.clear();
 				}
 			}
@@ -899,7 +903,7 @@ final class ModSolver {
 
 			if (suitableMods.size() > 1 // multiple options
 					|| enableOptional && firstMod.getLoadCondition() == ModLoadCondition.IF_POSSIBLE) { // optional greedy loading
-				dependencyHelper.atMost(1, suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.UNIQUE_ID, id));
+				lexicoHelper.atMost(1, suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.UNIQUE_ID, id));
 			}
 
 			suitableMods.clear();
@@ -919,7 +923,7 @@ final class ModSolver {
 					if (selectedMod != null) suitableMods.add(selectedMod);
 
 					if (suitableMods.size() > 1) {
-						dependencyHelper.atMost(1, suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.UNIQUE_ID, id));
+						lexicoHelper.atMost(1, suitableMods.toArray(new DomainObject[0])).named(new Explanation(ErrorKind.UNIQUE_ID, id));
 					}
 
 					suitableMods.clear();
@@ -931,7 +935,7 @@ final class ModSolver {
 					if (isReplacement) weight += 3;
 					if (mod.hadOnlyOutboundDepFailures) weight++;
 
-					weightedObjects.add(WeightedObject.newWO(mod, TWO.pow(weight)));
+					weightedObjects.computeIfAbsent(id, k -> new ArrayList<>()).add(WeightedObject.newWO(mod, TWO.pow(weight)));
 					i++;
 				}
 			}
@@ -940,20 +944,20 @@ final class ModSolver {
 
 	private static final BigInteger TWO = BigInteger.valueOf(2);
 
-	private static DependencyHelper<DomainObject, Explanation> createDepHelper(IPBSolver solver) {
-		DependencyHelper<DomainObject, Explanation> ret = new DependencyHelper<>(solver); // new LexicoHelper<>(solver)
+	private static LexicoHelper<DomainObject, Explanation> createLexicoHelper(IPBSolver solver) {
+		LexicoHelper<DomainObject, Explanation> ret = new LexicoHelper<>(solver);
 		ret.setNegator(negator);
 
 		return ret;
 	}
 
-	private static DomainObject getCreateDummy(String id, Function<String, DomainObject> supplier, Map<String, DomainObject> duplicateMap, int modCount, List<WeightedObject<DomainObject>> weightedObjects) {
+	private static DomainObject getCreateDummy(String id, Function<String, DomainObject> supplier, Map<String, DomainObject> duplicateMap, int modCount, Map<String, List<WeightedObject<DomainObject>>> weightedObjects) {
 		DomainObject ret = duplicateMap.get(id);
 		if (ret != null) return ret;
 
 		ret = supplier.apply(id);
 		int weight = modCount + 2;
-		weightedObjects.add(WeightedObject.newWO(ret, TWO.pow(weight)));
+		weightedObjects.computeIfAbsent(id, k -> new ArrayList<>()).add(WeightedObject.newWO(ret, TWO.pow(weight)));
 
 		return ret;
 	}
@@ -965,12 +969,13 @@ final class ModSolver {
 		return entry.getKey();
 	}
 
-	private static void applyDisableDepVarWeights(Map<ModDependency, Map.Entry<DomainObject, Integer>> map, int modCount, List<WeightedObject<DomainObject>> weightedObjects) {
+	private static void applyDisableDepVarWeights(Map<ModDependency, Map.Entry<DomainObject, Integer>> map, int modCount, Map<String, List<WeightedObject<DomainObject>>> weightedObjects) {
 		BigInteger baseWeight = TWO.pow(modCount + 3);
 
 		for (Map.Entry<DomainObject, Integer> entry : map.values()) {
+			DomainObject object = entry.getKey();
 			int count = entry.getValue();
-			weightedObjects.add(WeightedObject.newWO(entry.getKey(), count > 1 ? baseWeight.multiply(BigInteger.valueOf(count)) : baseWeight));
+			weightedObjects.computeIfAbsent(object.getId(), k -> new ArrayList<>()).add(WeightedObject.newWO(object, count > 1 ? baseWeight.multiply(BigInteger.valueOf(count)) : baseWeight));
 		}
 	}
 
