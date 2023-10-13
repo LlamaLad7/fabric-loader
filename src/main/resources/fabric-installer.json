@@ -42,6 +42,12 @@
       }
     ],
     "server": [
+    ],
+    "development": [
+      {
+        "name": "io.github.llamalad7:mixinextras-fabric:0.2.0",
+        "url": "https://repo.maven.apache.org/maven2/"
+      }
     ]
   },
   "mainClass": {
