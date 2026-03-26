@@ -22,6 +22,8 @@ import java.net.URL;
 import java.util.Collection;
 import java.util.Collections;
 
+import net.fabricmc.loader.impl.launch.FabricMixinVersions;
+
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.launch.platform.container.ContainerHandleURI;
@@ -30,6 +32,7 @@ import org.spongepowered.asm.logging.ILogger;
 import org.spongepowered.asm.mixin.MixinEnvironment;
 import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 import org.spongepowered.asm.mixin.transformer.IMixinTransformerFactory;
+import org.spongepowered.asm.service.IAdviceProvider;
 import org.spongepowered.asm.service.IClassBytecodeProvider;
 import org.spongepowered.asm.service.IClassProvider;
 import org.spongepowered.asm.service.IClassTracker;
@@ -174,7 +177,17 @@ public class MixinServiceKnot implements IMixinService, IClassProvider, IClassBy
 
 	@Override
 	public IFeatureValidator getFeatureValidator() {
-		return null;
+		return IFeatureValidator.ALLOW_ALL;
+	}
+
+	@Override
+	public IAdviceProvider getAdviceProvider() {
+		return new IAdviceProvider() {
+			@Override
+			public String higherCompatibilityNeeded(int requiredCompatibility, String requiredCompatibilityString) {
+				return "Increase your Fabric Loader dependency to at least " + FabricMixinVersions.getMinLoaderVersion(requiredCompatibility);
+			}
+		};
 	}
 
 	@Override
