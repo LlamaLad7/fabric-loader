@@ -48,6 +48,7 @@ allprojects {
 				excludeGroupByRegex "io.github.llamalad7"
 			}
 		}
+		mavenLocal()
 	}
 
 	dependencies {
